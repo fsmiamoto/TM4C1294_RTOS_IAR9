@@ -7,6 +7,8 @@
 **/settings/*.wsdt
 **/settings/*.wspos
 
+**/ewarm/Exe
+
 **/Debug/Exe/
 **/Debug/BrowseInfo/
 
@@ -31,5 +33,6 @@ Backup*
 *.dnx
 *ninja*
 *.reggroups
+*.out
 
 .vscode
