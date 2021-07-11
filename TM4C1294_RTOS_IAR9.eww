@@ -10,6 +10,9 @@
         <path>$WS_DIR$\TivaWare_C_Series-2.1.4.178\grlib\grlib.ewp</path>
     </project>
     <project>
+        <path>$WS_DIR$\Projects\Lab04\Lab04.ewp</path>
+    </project>
+    <project>
         <path>$WS_DIR$\Projects\prodcons\prodcons.ewp</path>
     </project>
     <project>
