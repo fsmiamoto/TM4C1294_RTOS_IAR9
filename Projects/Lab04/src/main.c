@@ -8,9 +8,9 @@ typedef struct {
   uint32_t activation_period; // Number of system ticks
 } led_blink_t;
 
-#define NUM_OF_BLINKERS 4
+#define NUM_OF_BLINKERS sizeof(blinkers)/sizeof(led_blink_t)
 
-led_blink_t blinkers[NUM_OF_BLINKERS] = {
+led_blink_t blinkers[] = {
     {.led_number = LED1, .activation_period = 200},
     {.led_number = LED2, .activation_period = 300},
     {.led_number = LED3, .activation_period = 500},
