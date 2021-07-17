@@ -14,4 +14,12 @@ boards built-in LEDs.
 
 ![Diagram](./diagram.png)
 
+## Debouncing
+
+On inevitable issue that appears when dealing with push-buttons is
+the debouncing them.
+
+For that, I've added a delay of 800 ticks to the consumer task to better coordinate the counter increments.
+
+
 
