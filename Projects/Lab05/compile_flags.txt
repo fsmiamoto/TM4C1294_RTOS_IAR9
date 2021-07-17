@@ -1,0 +1,10 @@
+-I
+..\drivers
+-I
+..\..\TivaWare_C_Series-2.1.4.178
+-I
+..\..\CMSIS-5.6.0\CMSIS\Core\Include
+-I
+..\..\CMSIS-5.6.0\CMSIS\RTOS2\Include
+-I
+..\..\CMSIS-5.6.0\CMSIS\RTOS2\RTX\Include

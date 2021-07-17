@@ -13,6 +13,9 @@
         <path>$WS_DIR$\Projects\Lab04\Lab04.ewp</path>
     </project>
     <project>
+        <path>$WS_DIR$\Projects\Lab05\Lab05.ewp</path>
+    </project>
+    <project>
         <path>$WS_DIR$\Projects\prodcons\prodcons.ewp</path>
     </project>
     <project>
