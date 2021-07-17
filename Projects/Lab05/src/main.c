@@ -4,36 +4,43 @@
 #include "cmsis_os2.h"
 
 #define LEDs LED1 | LED2 | LED3 | LED4
-
-#define BUFFER_SIZE 8
 #define MAX_COUNT 16
+#define BUFFER_SIZE 8
+#define CONSUMER_DELAY_TICKS 800
+#define NO_WAIT 0
 
-uint8_t counter;
+uint8_t buffer[BUFFER_SIZE];
 
 osSemaphoreId_t ready_id, empty_id;
 osThreadId_t consumer_id;
 
-uint8_t buffer[BUFFER_SIZE];
 
 void GPIOJ_Handler(void) {
-  static uint8_t index = 0;
-  osSemaphoreAcquire(empty_id, osWaitForever);
+  static uint8_t index = 0, counter = 0;
+  
+  osSemaphoreAcquire(empty_id, NO_WAIT);
   ButtonIntClear(USW1);
   counter = (counter + 1) % MAX_COUNT;
   buffer[index] = counter;
   osSemaphoreRelease(ready_id);
+  
   index = (index + 1) % BUFFER_SIZE;
 }
 
 void consumer(void* arg) {
-  uint8_t index = 0, state;
+  uint8_t index = 0, counter;
+  uint32_t tick;
 
   for(;;) {
+    tick = osKernelGetTickCount();
+    
     osSemaphoreAcquire(ready_id, osWaitForever);
-    state = buffer[index];
+    counter = buffer[index];
     osSemaphoreRelease(empty_id);
-    LEDWrite(LEDs, state);
+    
+    LEDWrite(LEDs, counter);
     index = (index + 1) % BUFFER_SIZE;
+    osDelayUntil(tick + CONSUMER_DELAY_TICKS);
   }
 }
 
