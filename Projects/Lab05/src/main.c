@@ -6,8 +6,8 @@
 #define LEDs LED1 | LED2 | LED3 | LED4
 #define MAX_COUNT 16
 #define BUFFER_SIZE 8
-#define CONSUMER_DELAY_TICKS 800
 #define NO_WAIT 0
+#define TICK_DEBOUNCE 200
 
 uint8_t buffer[BUFFER_SIZE];
 
@@ -16,30 +16,32 @@ osThreadId_t consumer_id;
 
 void GPIOJ_Handler(void) {
   static uint8_t index = 0, counter = 0;
+  static uint32_t last_update_tick;
 
-  osSemaphoreAcquire(empty_id, NO_WAIT);
   ButtonIntClear(USW1);
-  counter = (counter + 1) % MAX_COUNT;
-  buffer[index] = counter;
-  osSemaphoreRelease(ready_id);
+  if((osKernelGetTickCount() - last_update_tick) < TICK_DEBOUNCE)
+    return;
 
-  index = (index + 1) % BUFFER_SIZE;
+  osStatus_t  status = osSemaphoreAcquire(empty_id, NO_WAIT);
+  if (status == osOK) {
+    counter = (counter + 1) % MAX_COUNT;
+    buffer[index] = counter;
+    osSemaphoreRelease(ready_id);
+    index = (index + 1) % BUFFER_SIZE;
+    last_update_tick = osKernelGetTickCount();
+  }
 }
 
 void consumer(void *arg) {
   uint8_t index = 0, counter;
-  uint32_t tick;
 
   for (;;) {
-    tick = osKernelGetTickCount();
-
     osSemaphoreAcquire(ready_id, osWaitForever);
     counter = buffer[index];
     osSemaphoreRelease(empty_id);
 
     LEDWrite(LEDs, counter);
     index = (index + 1) % BUFFER_SIZE;
-    osDelayUntil(tick + CONSUMER_DELAY_TICKS);
   }
 }
 
