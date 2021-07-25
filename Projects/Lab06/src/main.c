@@ -9,16 +9,16 @@
 
 #define NUM_OF_WORKERS (sizeof(workers) / sizeof(pwm_worker_t))
 
-#define WORKER_QUEUE_SIZE 8
-#define MANAGER_QUEUE_SIZE 8
+#define WORKER_QUEUE_SIZE 8U
+#define MANAGER_QUEUE_SIZE 8U
 
-#define DEBOUNCE_TICKS 300
+#define DEBOUNCE_TICKS 300U
 
-#define NO_WAIT 0
-#define MSG_PRIO 0
+#define NO_WAIT 0U
+#define MSG_PRIO 0U
 
-#define PWM_PERIOD 10   // ms
-#define BLINK_PERIOD 50 // ms
+#define PWM_PERIOD 10U   // ms
+#define BLINK_PERIOD 50U // ms
 
 #define ButtonPressed(b) !ButtonRead(b) // Push buttons are active in low
 
@@ -32,8 +32,8 @@ typedef uint8_t manager_notif_t;
 typedef struct {
   osMessageQueueId_t queue_id;
   uint8_t led_number;
-  uint8_t duty_cycle;
-  uint16_t period;
+  uint16_t on_time; // ms
+  uint16_t period;  // ms
 } pwm_worker_args_t;
 
 typedef struct {
@@ -51,10 +51,10 @@ const osMutexAttr_t led_mutex_attr = {"LEDMutex", osMutexPrioInherit, NULL, 0U};
 
 pwm_manager_t manager;
 pwm_worker_t workers[] = {
-    {.args = {.led_number = LED1, .period = BLINK_PERIOD, .duty_cycle = 5}},
-    {.args = {.led_number = LED2, .period = PWM_PERIOD, .duty_cycle = 2}},
-    {.args = {.led_number = LED3, .period = PWM_PERIOD, .duty_cycle = 8}},
-    {.args = {.led_number = LED4, .period = PWM_PERIOD, .duty_cycle = 0}},
+    {.args = {.led_number = LED1, .period = BLINK_PERIOD, .on_time = 5}},
+    {.args = {.led_number = LED2, .period = PWM_PERIOD, .on_time = 2}},
+    {.args = {.led_number = LED3, .period = PWM_PERIOD, .on_time = 8}},
+    {.args = {.led_number = LED4, .period = PWM_PERIOD, .on_time = 0}},
 };
 
 void SwitchOn(uint8_t led) {
@@ -70,35 +70,36 @@ void SwitchOff(uint8_t led) {
 }
 
 void GPIOJ_Handler(void) {
-  static uint32_t last_msg_sw1, last_msg_sw2;
+  static uint32_t tick_last_msg_sw1, tick_last_msg_sw2;
 
   ButtonIntClear(USW1 | USW2);
 
   if (ButtonPressed(USW1)) {
-    if ((osKernelGetTickCount() - last_msg_sw1) < DEBOUNCE_TICKS)
+    if ((osKernelGetTickCount() - tick_last_msg_sw1) < DEBOUNCE_TICKS)
       return;
 
     button_event_t event = SW1_PRESSED;
     osStatus_t status =
         osMessageQueuePut(manager.queue_id, &event, MSG_PRIO, NO_WAIT);
     if (status == osOK)
-      last_msg_sw1 = osKernelGetTickCount();
+      tick_last_msg_sw1 = osKernelGetTickCount();
   }
 
   if (ButtonPressed(USW2)) {
-    if ((osKernelGetTickCount() - last_msg_sw2) < DEBOUNCE_TICKS)
+    if ((osKernelGetTickCount() - tick_last_msg_sw2) < DEBOUNCE_TICKS)
       return;
 
     button_event_t event = SW2_PRESSED;
     osStatus_t status =
         osMessageQueuePut(manager.queue_id, &event, MSG_PRIO, NO_WAIT);
     if (status == osOK)
-      last_msg_sw2 = osKernelGetTickCount();
+      tick_last_msg_sw2 = osKernelGetTickCount();
   }
 }
 
 void Manager(void *arg) {
   button_event_t event;
+  manager_notif_t notification;
   uint8_t selected_worker = 0;
 
   for (;;) {
@@ -106,23 +107,25 @@ void Manager(void *arg) {
 
     if (event == SW1_PRESSED) {
       workers[selected_worker].args.period = PWM_PERIOD;
+      osMessageQueuePut(workers[selected_worker].args.queue_id, &notification,
+                        MSG_PRIO, osWaitForever);
+
       selected_worker = (selected_worker + 1) % NUM_OF_WORKERS;
+
       workers[selected_worker].args.period = BLINK_PERIOD;
+      osMessageQueuePut(workers[selected_worker].args.queue_id, &notification,
+                        MSG_PRIO, osWaitForever);
     }
 
     if (event == SW2_PRESSED) {
-      uint8_t duty_cycle = workers[selected_worker].args.duty_cycle;
-      duty_cycle += 1;
-      if (duty_cycle > PWM_PERIOD)
-        duty_cycle = 0;
-      workers[selected_worker].args.duty_cycle = duty_cycle;
-    }
+      uint8_t on_time = workers[selected_worker].args.on_time;
+      on_time += 1;
+      if (on_time > PWM_PERIOD)
+        on_time = 0;
 
-    // Parameters may have changed, notify workers
-    for (int i = 0; i < NUM_OF_WORKERS; i++) {
-      manager_notif_t notification;
-      osMessageQueuePut(workers[i].args.queue_id, &notification, MSG_PRIO,
-                        osWaitForever);
+      workers[selected_worker].args.on_time = on_time;
+      osMessageQueuePut(workers[selected_worker].args.queue_id, &notification,
+                        MSG_PRIO, osWaitForever);
     }
   }
 }
@@ -134,21 +137,21 @@ void Worker(void *arg) {
 
   osMessageQueueId_t queue_id = args->queue_id;
   uint8_t led_number = args->led_number;
-  uint8_t duty_cycle = args->duty_cycle;
+  uint8_t on_time = args->on_time;
   uint16_t period = args->period;
 
   for (;;) {
     status = osMessageQueueGet(queue_id, &notification, NULL, NO_WAIT);
     if (status == osOK) {
       // Notification received, update values
-      duty_cycle = args->duty_cycle;
+      on_time = args->on_time;
       period = args->period;
     }
 
     SwitchOn(led_number);
-    osDelay(duty_cycle);
+    osDelay(on_time);
     SwitchOff(led_number);
-    osDelay(period - duty_cycle);
+    osDelay(period - on_time);
   }
 }
 
