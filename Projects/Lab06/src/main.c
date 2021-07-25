@@ -4,56 +4,88 @@
 #include "system_TM4C1294.h"
 
 #define LEDs LED1 | LED2 | LED3 | LED4
-#define MAX_COUNT 16
-#define BUFFER_SIZE 8
-#define CONSUMER_DELAY_TICKS 800
+#define BUTTONS USW1 | USW2
+
+#define NUM_OF_WORKERS 4
+#define WORKER_QUEUE_SIZE 8
+#define MANAGER_QUEUE_SIZE 8
+#define DEBOUNCE_TICKS 200
 #define NO_WAIT 0
+#define MSG_PRIO 0 
 
-uint8_t buffer[BUFFER_SIZE];
+#define ButtonPressed(b) !ButtonRead(b)
 
-osSemaphoreId_t ready_id, empty_id;
-osThreadId_t consumer_id;
+typedef enum {
+  SW1_PRESSED,
+  SW2_PRESSED,
+} button_event_t;
+
+osThreadId_t manager_thread_id;
+osThreadId_t worker_thread_ids[NUM_OF_WORKERS];
+
+osMessageQueueId_t worker_queue_ids[4];
+osMessageQueueId_t manager_queue_id;
+osMutexId_t leds_mutex_id;
 
 void GPIOJ_Handler(void) {
-  static uint8_t index = 0, counter = 0;
+  static uint32_t last_tick_sw1, last_tick_sw2;
 
-  osSemaphoreAcquire(empty_id, NO_WAIT);
-  ButtonIntClear(USW1);
-  counter = (counter + 1) % MAX_COUNT;
-  buffer[index] = counter;
-  osSemaphoreRelease(ready_id);
+  if(ButtonPressed(USW1)){
+    ButtonIntClear(USW1);
+    if((osKernelGetTickCount() - last_tick_sw1) < DEBOUNCE_TICKS)
+      return;
+    button_event_t event = SW1_PRESSED;
+    osStatus_t status = osMessageQueuePut(manager_queue_id, &event, MSG_PRIO, NO_WAIT);
+    return;
+  }
 
-  index = (index + 1) % BUFFER_SIZE;
+  if(ButtonPressed(USW2)){
+    ButtonIntClear(USW2);
+    if((osKernelGetTickCount() - last_tick_sw2) < DEBOUNCE_TICKS)
+      return;
+    button_event_t event = SW2_PRESSED;
+    osStatus_t status = osMessageQueuePut(manager_queue_id, &event, MSG_PRIO, NO_WAIT);
+    return;
+  }
 }
 
-void consumer(void *arg) {
-  uint8_t index = 0, counter;
-  uint32_t tick;
+void manager(void* arg) {
+  button_event_t event;
+  osStatus_t status;
+  uint8_t count = 0;
 
-  for (;;) {
-    tick = osKernelGetTickCount();
 
-    osSemaphoreAcquire(ready_id, osWaitForever);
-    counter = buffer[index];
-    osSemaphoreRelease(empty_id);
+  for(;;) {
+    status = osMessageQueueGet(manager_queue_id, &event, NULL, osWaitForever);
+    if(status != osOK)
+      continue;
 
-    LEDWrite(LEDs, counter);
-    index = (index + 1) % BUFFER_SIZE;
-    osDelayUntil(tick + CONSUMER_DELAY_TICKS);
+    if(event == SW1_PRESSED) {
+      count = 0xF;
+    }
+
+    if(event == SW2_PRESSED){
+      count = 0;
+    }
+
+    osMutexAcquire(leds_mutex_id, osWaitForever);
+    LEDWrite(LEDs, count);
+    osMutexRelease(leds_mutex_id);
   }
+}
+
+void worker(void *arg) {
 }
 
 void main(void) {
   LEDInit(LEDs);
-  ButtonInit(USW1);
-  ButtonIntEnable(USW1);
+  ButtonInit(USW1|USW2);
+  ButtonIntEnable(USW1|USW2);
 
   osKernelInitialize();
 
-  consumer_id = osThreadNew(consumer, NULL, NULL);
-
-  empty_id = osSemaphoreNew(BUFFER_SIZE, BUFFER_SIZE, NULL);
-  ready_id = osSemaphoreNew(BUFFER_SIZE, 0, NULL);
+  manager_queue_id = osMessageQueueNew(MANAGER_QUEUE_SIZE, sizeof(button_event_t), NULL);
+  manager_thread_id = osThreadNew(manager, NULL, NULL);
 
   if (osKernelGetState() == osKernelReady)
     osKernelStart();
