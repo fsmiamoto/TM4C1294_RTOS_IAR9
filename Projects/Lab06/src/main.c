@@ -20,20 +20,22 @@
 #define PWM_PERIOD 10U   // ms
 #define BLINK_PERIOD 50U // ms
 
-#define ButtonPressed(b) !ButtonRead(b) // Push buttons are active in low
+// Push buttons are active in low
+#define ButtonPressed(b) !ButtonRead(b)
 
 typedef enum {
   SW1_PRESSED,
   SW2_PRESSED,
 } button_event_t;
 
+// Manager notification to workers, no content needed.
 typedef uint8_t manager_notif_t;
 
 typedef struct {
   osMessageQueueId_t queue_id;
-  uint8_t led_number;
-  uint16_t on_time; // ms
-  uint16_t period;  // ms
+  uint8_t led_number; // One of LED1, LED2, LED3 and LED4.
+  uint16_t on_time;   // In ms
+  uint16_t period;    // In ms
 } pwm_worker_args_t;
 
 typedef struct {
@@ -70,6 +72,7 @@ void SwitchOff(uint8_t led) {
 }
 
 void GPIOJ_Handler(void) {
+  // Used for debouncing
   static uint32_t tick_last_msg_sw1, tick_last_msg_sw2;
 
   ButtonIntClear(USW1 | USW2);
@@ -97,6 +100,9 @@ void GPIOJ_Handler(void) {
   }
 }
 
+// Manager is the body of the manager thread.
+// It receives events through a queue and notifies
+// workers that need to update their values.
 void Manager(void *arg) {
   button_event_t event;
   manager_notif_t notification;
@@ -106,6 +112,7 @@ void Manager(void *arg) {
     osMessageQueueGet(manager.queue_id, &event, NULL, osWaitForever);
 
     if (event == SW1_PRESSED) {
+      // We need to restore the PWM period of the current selected worker
       workers[selected_worker].args.period = PWM_PERIOD;
       osMessageQueuePut(workers[selected_worker].args.queue_id, &notification,
                         MSG_PRIO, osWaitForever);
@@ -130,6 +137,9 @@ void Manager(void *arg) {
   }
 }
 
+// Worker is the body of worker threads.
+// It polls for notifications from the manager thread and
+// updates it's argument values if needed.
 void Worker(void *arg) {
   pwm_worker_args_t *args = (pwm_worker_args_t *)arg;
   manager_notif_t notification;
@@ -155,6 +165,20 @@ void Worker(void *arg) {
   }
 }
 
+void initializeWorkers(void) {
+  for (int i = 0; i < NUM_OF_WORKERS; i++) {
+    workers[i].args.queue_id =
+        osMessageQueueNew(WORKER_QUEUE_SIZE, sizeof(manager_notif_t), NULL);
+    workers[i].thread_id = osThreadNew(Worker, &workers[i].args, NULL);
+  }
+}
+
+void initializeManager(void) {
+  manager.thread_id = osThreadNew(Manager, NULL, NULL);
+  manager.queue_id =
+      osMessageQueueNew(MANAGER_QUEUE_SIZE, sizeof(button_event_t), NULL);
+}
+
 void main(void) {
   LEDInit(LEDs);
   ButtonInit(USW1 | USW2);
@@ -162,17 +186,9 @@ void main(void) {
 
   osKernelInitialize();
 
-  manager.thread_id = osThreadNew(Manager, NULL, NULL);
-  manager.queue_id =
-      osMessageQueueNew(MANAGER_QUEUE_SIZE, sizeof(button_event_t), NULL);
-
+  initializeManager();
+  initializeWorkers();
   led_mutex_id = osMutexNew(&led_mutex_attr);
-
-  for (int i = 0; i < NUM_OF_WORKERS; i++) {
-    workers[i].args.queue_id =
-        osMessageQueueNew(WORKER_QUEUE_SIZE, sizeof(manager_notif_t), NULL);
-    workers[i].thread_id = osThreadNew(Worker, &workers[i].args, NULL);
-  }
 
   if (osKernelGetState() == osKernelReady)
     osKernelStart();
