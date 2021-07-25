@@ -13,7 +13,6 @@
 #define DEBOUNCE_TICKS 300
 #define NO_WAIT 0
 #define MSG_PRIO 0
-#define MAX_DUTY_CYCLE 10
 
 #define ButtonPressed(b) !ButtonRead(b) // Push buttons are low-active
 
@@ -22,15 +21,13 @@ typedef enum {
   SW2_PRESSED,
 } button_event_t;
 
-typedef struct {
-  uint8_t is_selected;
-  uint8_t should_increase_brightness;
-} manager_event_t;
+typedef uint8_t manager_event_t;
 
 typedef struct {
   osMessageQueueId_t queue_id;
   uint8_t led_number;
   uint8_t duty_cycle;
+  uint16_t period;
 } pwm_worker_args_t;
 
 typedef struct {
@@ -44,14 +41,28 @@ typedef struct {
 } pwm_manager_t;
 
 osMutexId_t leds_mutex_id;
+const osMutexAttr_t leds_mutex_attr = {"LEDMutex", osMutexPrioInherit, NULL,
+                                       0U};
 
 pwm_manager_t manager;
 pwm_worker_t workers[] = {
-    {.args = {.led_number = LED1, .duty_cycle = 5}},
-    {.args = {.led_number = LED2, .duty_cycle = 2}},
-    {.args = {.led_number = LED3, .duty_cycle = 8}},
-    {.args = {.led_number = LED4, .duty_cycle = 0}},
+    {.args = {.led_number = LED1, .period = 10, .duty_cycle = 5}},
+    {.args = {.led_number = LED2, .period = 10, .duty_cycle = 2}},
+    {.args = {.led_number = LED3, .period = 10, .duty_cycle = 8}},
+    {.args = {.led_number = LED4, .period = 10, .duty_cycle = 0}},
 };
+
+void SwitchOn(uint8_t led) {
+  osMutexAcquire(leds_mutex_id, osWaitForever);
+  LEDOn(led);
+  osMutexRelease(leds_mutex_id);
+}
+
+void SwitchOff(uint8_t led) {
+  osMutexAcquire(leds_mutex_id, osWaitForever);
+  LEDOff(led);
+  osMutexRelease(leds_mutex_id);
+}
 
 void GPIOJ_Handler(void) {
   static uint32_t last_msg_sw1, last_msg_sw2;
@@ -83,7 +94,7 @@ void GPIOJ_Handler(void) {
   }
 }
 
-void _manager(void *arg) {
+void pwm_manager(void *arg) {
   button_event_t event;
   uint8_t selected_worker = 0;
 
@@ -95,20 +106,25 @@ void _manager(void *arg) {
     }
 
     if (event == SW2_PRESSED) {
-      workers[selected_worker].args.duty_cycle += 1;
-      if (workers[selected_worker].args.duty_cycle > MAX_DUTY_CYCLE)
-        workers[selected_worker].args.duty_cycle = 0;
+      uint8_t duty_cycle = workers[selected_worker].args.duty_cycle;
+      uint8_t period = workers[selected_worker].args.period;
+
+      duty_cycle += 1;
+      if (duty_cycle > period)
+        duty_cycle = 0;
+
+      workers[selected_worker].args.duty_cycle = duty_cycle;
     }
 
-    // Ping workers
+    // Parameters may have changed, notify workers
     for (int i = 0; i < NUM_OF_WORKERS; i++) {
-      manager_event_t e = {.is_selected = i == selected_worker};
+      manager_event_t e;
       osMessageQueuePut(workers[i].args.queue_id, &e, MSG_PRIO, osWaitForever);
     }
   }
 }
 
-void _worker(void *arg) {
+void pwm_worker(void *arg) {
   pwm_worker_args_t *args = (pwm_worker_args_t *)arg;
   manager_event_t event;
   osStatus_t status;
@@ -116,22 +132,20 @@ void _worker(void *arg) {
   osMessageQueueId_t queue_id = args->queue_id;
   uint8_t led_number = args->led_number;
   uint8_t duty_cycle = args->duty_cycle;
+  uint16_t period = args->period;
 
   for (;;) {
     status = osMessageQueueGet(queue_id, &event, NULL, NO_WAIT);
     if (status == osOK) {
-      // Message received, update duty cycle
+      // Message received, update values
       duty_cycle = args->duty_cycle;
+      period = args->period;
     }
 
-    osMutexAcquire(leds_mutex_id, osWaitForever);
-    LEDOn(led_number);
-    osMutexRelease(leds_mutex_id);
+    SwitchOn(led_number);
     osDelay(duty_cycle);
-    osMutexAcquire(leds_mutex_id, osWaitForever);
-    LEDOff(led_number);
-    osMutexRelease(leds_mutex_id);
-    osDelay(MAX_DUTY_CYCLE - duty_cycle);
+    SwitchOff(led_number);
+    osDelay(period - duty_cycle);
   }
 }
 
@@ -142,14 +156,16 @@ void main(void) {
 
   osKernelInitialize();
 
-  manager.thread_id = osThreadNew(_manager, NULL, NULL);
+  manager.thread_id = osThreadNew(pwm_manager, NULL, NULL);
   manager.queue_id =
       osMessageQueueNew(MANAGER_QUEUE_SIZE, sizeof(button_event_t), NULL);
+
+  leds_mutex_id = osMutexNew(&leds_mutex_attr);
 
   for (int i = 0; i < NUM_OF_WORKERS; i++) {
     workers[i].args.queue_id =
         osMessageQueueNew(WORKER_QUEUE_SIZE, sizeof(manager_event_t), NULL);
-    workers[i].thread_id = osThreadNew(_worker, &workers[i].args, NULL);
+    workers[i].thread_id = osThreadNew(pwm_worker, &workers[i].args, NULL);
   }
 
   if (osKernelGetState() == osKernelReady)
