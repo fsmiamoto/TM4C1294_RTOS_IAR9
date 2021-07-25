@@ -67,9 +67,9 @@ void SwitchOff(uint8_t led) {
 void GPIOJ_Handler(void) {
   static uint32_t last_msg_sw1, last_msg_sw2;
 
-  if (ButtonPressed(USW1)) {
-    ButtonIntClear(USW1);
+  ButtonIntClear(USW1 | USW2);
 
+  if (ButtonPressed(USW1)) {
     if ((osKernelGetTickCount() - last_msg_sw1) < DEBOUNCE_TICKS)
       return;
 
@@ -81,8 +81,6 @@ void GPIOJ_Handler(void) {
   }
 
   if (ButtonPressed(USW2)) {
-    ButtonIntClear(USW2);
-
     if ((osKernelGetTickCount() - last_msg_sw2) < DEBOUNCE_TICKS)
       return;
 
