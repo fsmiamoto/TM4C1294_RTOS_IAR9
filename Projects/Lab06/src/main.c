@@ -10,12 +10,12 @@
 #define NUM_OF_WORKERS (sizeof(workers) / sizeof(pwm_worker_t))
 #define WORKER_QUEUE_SIZE 8
 #define MANAGER_QUEUE_SIZE 8
-#define DEBOUNCE_TICKS 200
+#define DEBOUNCE_TICKS 300
 #define NO_WAIT 0
 #define MSG_PRIO 0
 #define MAX_DUTY_CYCLE 10
 
-#define ButtonPressed(b) !ButtonRead(b)
+#define ButtonPressed(b) !ButtonRead(b) // Push buttons are low-active
 
 typedef enum {
   SW1_PRESSED,
@@ -54,26 +54,32 @@ pwm_worker_t workers[] = {
 };
 
 void GPIOJ_Handler(void) {
-  static uint32_t last_tick_sw1, last_tick_sw2;
+  static uint32_t last_msg_sw1, last_msg_sw2;
 
   if (ButtonPressed(USW1)) {
     ButtonIntClear(USW1);
-    if ((osKernelGetTickCount() - last_tick_sw1) < DEBOUNCE_TICKS)
+
+    if ((osKernelGetTickCount() - last_msg_sw1) < DEBOUNCE_TICKS)
       return;
+
     button_event_t event = SW1_PRESSED;
     osStatus_t status =
         osMessageQueuePut(manager.queue_id, &event, MSG_PRIO, NO_WAIT);
-    return;
+    if (status == osOK)
+      last_msg_sw1 = osKernelGetTickCount();
   }
 
   if (ButtonPressed(USW2)) {
     ButtonIntClear(USW2);
-    if ((osKernelGetTickCount() - last_tick_sw2) < DEBOUNCE_TICKS)
+
+    if ((osKernelGetTickCount() - last_msg_sw2) < DEBOUNCE_TICKS)
       return;
+
     button_event_t event = SW2_PRESSED;
     osStatus_t status =
         osMessageQueuePut(manager.queue_id, &event, MSG_PRIO, NO_WAIT);
-    return;
+    if (status == osOK)
+      last_msg_sw2 = osKernelGetTickCount();
   }
 }
 
@@ -94,6 +100,7 @@ void _manager(void *arg) {
         workers[selected_worker].args.duty_cycle = 0;
     }
 
+    // Ping workers
     for (int i = 0; i < NUM_OF_WORKERS; i++) {
       manager_event_t e = {.is_selected = i == selected_worker};
       osMessageQueuePut(workers[i].args.queue_id, &e, MSG_PRIO, osWaitForever);
