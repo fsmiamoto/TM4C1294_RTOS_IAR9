@@ -14,6 +14,9 @@
 #define NO_WAIT 0
 #define MSG_PRIO 0
 
+#define PWM_PERIOD 10
+#define BLINK_PERIOD 50
+
 #define ButtonPressed(b) !ButtonRead(b) // Push buttons are low-active
 
 typedef enum {
@@ -46,10 +49,10 @@ const osMutexAttr_t leds_mutex_attr = {"LEDMutex", osMutexPrioInherit, NULL,
 
 pwm_manager_t manager;
 pwm_worker_t workers[] = {
-    {.args = {.led_number = LED1, .period = 10, .duty_cycle = 5}},
-    {.args = {.led_number = LED2, .period = 10, .duty_cycle = 2}},
-    {.args = {.led_number = LED3, .period = 10, .duty_cycle = 8}},
-    {.args = {.led_number = LED4, .period = 10, .duty_cycle = 0}},
+    {.args = {.led_number = LED1, .period = BLINK_PERIOD, .duty_cycle = 5}},
+    {.args = {.led_number = LED2, .period = PWM_PERIOD, .duty_cycle = 2}},
+    {.args = {.led_number = LED3, .period = PWM_PERIOD, .duty_cycle = 8}},
+    {.args = {.led_number = LED4, .period = PWM_PERIOD, .duty_cycle = 0}},
 };
 
 void SwitchOn(uint8_t led) {
@@ -100,17 +103,16 @@ void pwm_manager(void *arg) {
     osMessageQueueGet(manager.queue_id, &event, NULL, osWaitForever);
 
     if (event == SW1_PRESSED) {
+      workers[selected_worker].args.period = PWM_PERIOD;
       selected_worker = (selected_worker + 1) % NUM_OF_WORKERS;
+      workers[selected_worker].args.period = BLINK_PERIOD;
     }
 
     if (event == SW2_PRESSED) {
       uint8_t duty_cycle = workers[selected_worker].args.duty_cycle;
-      uint8_t period = workers[selected_worker].args.period;
-
       duty_cycle += 1;
-      if (duty_cycle > period)
+      if (duty_cycle > PWM_PERIOD)
         duty_cycle = 0;
-
       workers[selected_worker].args.duty_cycle = duty_cycle;
     }
 
