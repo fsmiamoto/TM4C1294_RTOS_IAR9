@@ -10,9 +10,10 @@
 #define NUM_OF_WORKERS (sizeof(workers) / sizeof(pwm_worker_t))
 #define WORKER_QUEUE_SIZE 8
 #define MANAGER_QUEUE_SIZE 8
-#define DEBOUNCE_TICKS 300
+#define DEBOUNCE_TICKS 200
 #define NO_WAIT 0
 #define MSG_PRIO 0
+#define MAX_DUTY_CYCLE 10
 
 #define ButtonPressed(b) !ButtonRead(b)
 
@@ -29,6 +30,7 @@ typedef struct {
 typedef struct {
   osMessageQueueId_t queue_id;
   uint8_t led_number;
+  uint8_t duty_cycle;
 } pwm_worker_args_t;
 
 typedef struct {
@@ -45,10 +47,10 @@ osMutexId_t leds_mutex_id;
 
 pwm_manager_t manager;
 pwm_worker_t workers[] = {
-    {.args = {.led_number = LED1}},
-    {.args = {.led_number = LED2}},
-    {.args = {.led_number = LED3}},
-    {.args = {.led_number = LED4}},
+    {.args = {.led_number = LED1, .duty_cycle = 5}},
+    {.args = {.led_number = LED2, .duty_cycle = 2}},
+    {.args = {.led_number = LED3, .duty_cycle = 8}},
+    {.args = {.led_number = LED4, .duty_cycle = 0}},
 };
 
 void GPIOJ_Handler(void) {
@@ -77,8 +79,7 @@ void GPIOJ_Handler(void) {
 
 void _manager(void *arg) {
   button_event_t event;
-  osStatus_t status;
-  uint8_t selected_worker = 0, increase_brightness = 0;
+  uint8_t selected_worker = 0;
 
   for (;;) {
     osMessageQueueGet(manager.queue_id, &event, NULL, osWaitForever);
@@ -88,15 +89,13 @@ void _manager(void *arg) {
     }
 
     if (event == SW2_PRESSED) {
-      increase_brightness = 1;
-    } else {
-      increase_brightness = 0;
+      workers[selected_worker].args.duty_cycle += 1;
+      if (workers[selected_worker].args.duty_cycle > MAX_DUTY_CYCLE)
+        workers[selected_worker].args.duty_cycle = 0;
     }
 
     for (int i = 0; i < NUM_OF_WORKERS; i++) {
-      manager_event_t e = {.is_selected = i == selected_worker,
-                           .should_increase_brightness =
-                               (i == selected_worker) && increase_brightness};
+      manager_event_t e = {.is_selected = i == selected_worker};
       osMessageQueuePut(workers[i].args.queue_id, &e, MSG_PRIO, osWaitForever);
     }
   }
@@ -107,21 +106,25 @@ void _worker(void *arg) {
   manager_event_t event;
   osStatus_t status;
 
-  uint8_t is_selected = 0;
-  uint32_t tick;
+  osMessageQueueId_t queue_id = args->queue_id;
+  uint8_t led_number = args->led_number;
+  uint8_t duty_cycle = args->duty_cycle;
 
   for (;;) {
-    tick = osKernelGetTickCount();
-    status = osMessageQueueGet(args->queue_id, &event, NULL, NO_WAIT);
+    status = osMessageQueueGet(queue_id, &event, NULL, NO_WAIT);
     if (status == osOK) {
-      is_selected = event.is_selected;
+      // Message received, update duty cycle
+      duty_cycle = args->duty_cycle;
     }
 
     osMutexAcquire(leds_mutex_id, osWaitForever);
-    is_selected ? LEDToggle(args->led_number) : LEDOff(args->led_number);
+    LEDOn(led_number);
     osMutexRelease(leds_mutex_id);
-
-    osDelayUntil(tick + 100);
+    osDelay(duty_cycle);
+    osMutexAcquire(leds_mutex_id, osWaitForever);
+    LEDOff(led_number);
+    osMutexRelease(leds_mutex_id);
+    osDelay(MAX_DUTY_CYCLE - duty_cycle);
   }
 }
 
