@@ -637,7 +637,7 @@
                 </option>
                 <option>
                     <name>OOCOutputFile</name>
-                    <state>Lab05.bin</state>
+                    <state>Lab06.bin</state>
                 </option>
                 <option>
                     <name>OOCCommandLineProducer</name>
@@ -655,7 +655,7 @@
             <data>
                 <extensions></extensions>
                 <cmdline></cmdline>
-                <hasPrio>64</hasPrio>
+                <hasPrio>240</hasPrio>
                 <buildSequence>inputOutputBased</buildSequence>
             </data>
         </settings>
@@ -684,7 +684,7 @@
                 </option>
                 <option>
                     <name>IlinkOutputFile</name>
-                    <state>Lab05.out</state>
+                    <state>Lab06.out</state>
                 </option>
                 <option>
                     <name>IlinkDebugInfoEnable</name>
