@@ -7,12 +7,12 @@
 #define LEDs LED1 | LED2 | LED3 | LED4
 #define BUTTONS USW1 | USW2
 
-#define NUM_OF_WORKERS sizeof(workers)/sizeof(pwm_worker)
+#define NUM_OF_WORKERS (sizeof(workers) / sizeof(pwm_worker_t))
 #define WORKER_QUEUE_SIZE 8
 #define MANAGER_QUEUE_SIZE 8
-#define DEBOUNCE_TICKS 200
+#define DEBOUNCE_TICKS 300
 #define NO_WAIT 0
-#define MSG_PRIO 0 
+#define MSG_PRIO 0
 
 #define ButtonPressed(b) !ButtonRead(b)
 
@@ -45,91 +45,102 @@ osMutexId_t leds_mutex_id;
 
 pwm_manager_t manager;
 pwm_worker_t workers[] = {
-  {.args = {.led_number = LED1}},
-  {.args = {.led_number = LED2}},
-  {.args = {.led_number = LED3}},
-  {.args = {.led_number = LED4}},
+    {.args = {.led_number = LED1}},
+    {.args = {.led_number = LED2}},
+    {.args = {.led_number = LED3}},
+    {.args = {.led_number = LED4}},
 };
-
 
 void GPIOJ_Handler(void) {
   static uint32_t last_tick_sw1, last_tick_sw2;
 
-  if(ButtonPressed(USW1)){
+  if (ButtonPressed(USW1)) {
     ButtonIntClear(USW1);
-    if((osKernelGetTickCount() - last_tick_sw1) < DEBOUNCE_TICKS)
+    if ((osKernelGetTickCount() - last_tick_sw1) < DEBOUNCE_TICKS)
       return;
     button_event_t event = SW1_PRESSED;
-    osStatus_t status = osMessageQueuePut(manager.queue_id, &event, MSG_PRIO, NO_WAIT);
+    osStatus_t status =
+        osMessageQueuePut(manager.queue_id, &event, MSG_PRIO, NO_WAIT);
     return;
   }
 
-  if(ButtonPressed(USW2)){
+  if (ButtonPressed(USW2)) {
     ButtonIntClear(USW2);
-    if((osKernelGetTickCount() - last_tick_sw2) < DEBOUNCE_TICKS)
+    if ((osKernelGetTickCount() - last_tick_sw2) < DEBOUNCE_TICKS)
       return;
     button_event_t event = SW2_PRESSED;
-    osStatus_t status = osMessageQueuePut(manager.queue_id, &event, MSG_PRIO, NO_WAIT);
+    osStatus_t status =
+        osMessageQueuePut(manager.queue_id, &event, MSG_PRIO, NO_WAIT);
     return;
   }
 }
 
-void _manager(void* arg) {
+void _manager(void *arg) {
   button_event_t event;
   osStatus_t status;
-  uint8_t count = 0;
+  uint8_t selected_worker = 0, increase_brightness = 0;
 
+  for (;;) {
+    osMessageQueueGet(manager.queue_id, &event, NULL, osWaitForever);
 
-  for(;;) {
-    status = osMessageQueueGet(manager.queue_id, &event, NULL, osWaitForever);
-    if(status != osOK)
-      continue;
-
-    if(event == SW1_PRESSED) {
-      count = 0xF;
+    if (event == SW1_PRESSED) {
+      selected_worker = (selected_worker + 1) % NUM_OF_WORKERS;
     }
 
-    if(event == SW2_PRESSED){
-      count = 0;
+    if (event == SW2_PRESSED) {
+      increase_brightness = 1;
+    } else {
+      increase_brightness = 0;
     }
 
-    osMutexAcquire(leds_mutex_id, osWaitForever);
-    LEDWrite(LEDs, count);
-    osMutexRelease(leds_mutex_id);
+    for (int i = 0; i < NUM_OF_WORKERS; i++) {
+      manager_event_t e = {.is_selected = i == selected_worker,
+                           .should_increase_brightness =
+                               (i == selected_worker) && increase_brightness};
+      osMessageQueuePut(workers[i].args.queue_id, &e, MSG_PRIO, osWaitForever);
+    }
   }
 }
 
 void _worker(void *arg) {
-  pwm_worker_args_t* args = (pwm_worker_args_t*)arg; 
-  manager_event_t event; 
+  pwm_worker_args_t *args = (pwm_worker_args_t *)arg;
+  manager_event_t event;
   osStatus_t status;
 
-  uint8_t is_selected = 0, value = 0;
+  uint8_t is_selected = 0;
+  uint32_t tick;
 
-  for(;;) {
-    status = osMessageQueueGet(args->queue_id,&event,NULL,NO_WAIT);
-    if(status == osOK) {
-      // Message received
+  for (;;) {
+    tick = osKernelGetTickCount();
+    status = osMessageQueueGet(args->queue_id, &event, NULL, NO_WAIT);
+    if (status == osOK) {
       is_selected = event.is_selected;
     }
 
-    value = is_selected ? 1 << (args->led_number - 1) : 0;
-
     osMutexAcquire(leds_mutex_id, osWaitForever);
-    LEDWrite(args->led_number, value);
+    is_selected ? LEDToggle(args->led_number) : LEDOff(args->led_number);
     osMutexRelease(leds_mutex_id);
+
+    osDelayUntil(tick + 100);
   }
 }
 
 void main(void) {
   LEDInit(LEDs);
-  ButtonInit(USW1|USW2);
-  ButtonIntEnable(USW1|USW2);
+  ButtonInit(USW1 | USW2);
+  ButtonIntEnable(USW1 | USW2);
 
   osKernelInitialize();
 
   manager.thread_id = osThreadNew(_manager, NULL, NULL);
-  manager.queue_id = osMessageQueueNew(MANAGER_QUEUE_SIZE, sizeof(button_event_t), NULL);
+  manager.queue_id =
+      osMessageQueueNew(MANAGER_QUEUE_SIZE, sizeof(button_event_t), NULL);
+
+  for (int i = 0; i < NUM_OF_WORKERS; i++) {
+    workers[i].args.queue_id =
+        osMessageQueueNew(WORKER_QUEUE_SIZE, sizeof(manager_event_t), NULL);
+    workers[i].thread_id = osThreadNew(_worker, &workers[i].args, NULL);
+  }
 
   if (osKernelGetState() == osKernelReady)
     osKernelStart();
