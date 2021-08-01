@@ -1,6 +1,7 @@
 #include "cmsis_os2.h"
 #include "driverbuttons.h"
 #include "driverleds.h"
+#include "pwm.h"
 #include "system_TM4C1294.h"
 #include <stdint.h>
 
@@ -65,47 +66,19 @@ worker_t workers[] = {
     {.args = {.led_number = LED4, .period = PWM_PERIOD, .on_time = 0}},
 };
 
-// SwitchOn switches on a led in a thread-safe manner
-void SwitchOn(uint8_t led) {
-  osMutexAcquire(led_mutex_id, osWaitForever);
-  LEDOn(led);
-  osMutexRelease(led_mutex_id);
-}
+void main(void) {
+  initializeHardware();
+  osKernelInitialize();
+  initializeManager();
+  initializeWorkers();
+  led_mutex_id = osMutexNew(&led_mutex_attr);
 
-// SwitchOff switches off a led in a thread-safe manner
-void SwitchOff(uint8_t led) {
-  osMutexAcquire(led_mutex_id, osWaitForever);
-  LEDOff(led);
-  osMutexRelease(led_mutex_id);
-}
+  if (osKernelGetState() == osKernelReady)
+    osKernelStart();
 
-void GPIOJ_Handler(void) {
-  // Used for debouncing
-  static uint32_t tick_last_msg_sw1, tick_last_msg_sw2;
-
-  ButtonIntClear(USW1 | USW2);
-
-  if (ButtonPressed(USW1)) {
-    if ((osKernelGetTickCount() - tick_last_msg_sw1) < DEBOUNCE_TICKS)
-      return;
-
-    button_event_t event = SW1_PRESSED;
-    osStatus_t status =
-        osMessageQueuePut(manager.queue_id, &event, MSG_PRIO, NO_WAIT);
-    if (status == osOK)
-      tick_last_msg_sw1 = osKernelGetTickCount();
-  }
-
-  if (ButtonPressed(USW2)) {
-    if ((osKernelGetTickCount() - tick_last_msg_sw2) < DEBOUNCE_TICKS)
-      return;
-
-    button_event_t event = SW2_PRESSED;
-    osStatus_t status =
-        osMessageQueuePut(manager.queue_id, &event, MSG_PRIO, NO_WAIT);
-    if (status == osOK)
-      tick_last_msg_sw2 = osKernelGetTickCount();
-  }
+  // NOT REACHED
+  while (1)
+    ;
 }
 
 // Manager is the body of the manager thread.
@@ -167,6 +140,49 @@ void Worker(void *arg) {
   }
 }
 
+void GPIOJ_Handler(void) {
+  // Used for debouncing
+  static uint32_t tick_last_msg_sw1, tick_last_msg_sw2;
+
+  ButtonIntClear(USW1 | USW2);
+
+  if (ButtonPressed(USW1)) {
+    if ((osKernelGetTickCount() - tick_last_msg_sw1) < DEBOUNCE_TICKS)
+      return;
+
+    button_event_t event = SW1_PRESSED;
+    osStatus_t status =
+        osMessageQueuePut(manager.queue_id, &event, MSG_PRIO, NO_WAIT);
+    if (status == osOK)
+      tick_last_msg_sw1 = osKernelGetTickCount();
+  }
+
+  if (ButtonPressed(USW2)) {
+    if ((osKernelGetTickCount() - tick_last_msg_sw2) < DEBOUNCE_TICKS)
+      return;
+
+    button_event_t event = SW2_PRESSED;
+    osStatus_t status =
+        osMessageQueuePut(manager.queue_id, &event, MSG_PRIO, NO_WAIT);
+    if (status == osOK)
+      tick_last_msg_sw2 = osKernelGetTickCount();
+  }
+}
+
+// SwitchOn switches on a led in a thread-safe manner
+void SwitchOn(uint8_t led) {
+  osMutexAcquire(led_mutex_id, osWaitForever);
+  LEDOn(led);
+  osMutexRelease(led_mutex_id);
+}
+
+// SwitchOff switches off a led in a thread-safe manner
+void SwitchOff(uint8_t led) {
+  osMutexAcquire(led_mutex_id, osWaitForever);
+  LEDOff(led);
+  osMutexRelease(led_mutex_id);
+}
+
 void initializeHardware(void) {
   LEDInit(LEDs);
   ButtonInit(USW1 | USW2);
@@ -185,19 +201,4 @@ void initializeManager(void) {
   manager.thread_id = osThreadNew(Manager, NULL, NULL);
   manager.queue_id =
       osMessageQueueNew(MANAGER_QUEUE_SIZE, sizeof(button_event_t), NULL);
-}
-
-void main(void) {
-  initializeHardware();
-  osKernelInitialize();
-  initializeManager();
-  initializeWorkers();
-  led_mutex_id = osMutexNew(&led_mutex_attr);
-
-  if (osKernelGetState() == osKernelReady)
-    osKernelStart();
-
-  // NOT REACHED
-  while (1)
-    ;
 }
