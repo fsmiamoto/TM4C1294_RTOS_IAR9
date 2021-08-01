@@ -5,8 +5,12 @@ the built-in push buttons.
 
 # Diagrams
 
+## Architecture
 ![Architecture](../diagramas/architecture.png)
 
-![Manager activities](../diagramas/manager.png)
 
-![Worker activities](../diagramas/worker.png)
+## Manager thread
+<img src="../diagramas/manager.png" height="400" alt="Manager thread activities"/>
+
+## Worker thread
+<img src="../diagramas/worker.png" height="400" alt="Worker thread activities"/>
