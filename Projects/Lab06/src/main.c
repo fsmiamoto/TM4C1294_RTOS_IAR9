@@ -6,7 +6,7 @@
 
 #define LEDs LED1 | LED2 | LED3 | LED4
 
-#define NUM_OF_WORKERS (sizeof(workers) / sizeof(pwm_worker_t))
+#define NUM_OF_WORKERS (sizeof(workers) / sizeof(worker_t))
 
 #define WORKER_QUEUE_SIZE 8U
 #define MANAGER_QUEUE_SIZE 8U
@@ -34,30 +34,31 @@ typedef enum {
 // Notification to workers, no content needed.
 typedef uint8_t manager_notif_t;
 
+// worker_args_t represents the arguments for a worker thread
 typedef struct {
   osMessageQueueId_t queue_id;
   uint8_t led_number; // One of LED1, LED2, LED3 and LED4.
   uint16_t on_time;   // In ms
   uint16_t period;    // In ms
-} pwm_worker_args_t;
+} worker_args_t;
 
-// pwm_worker_t represents a worker thread and it's arguments
+// worker_t represents a worker thread and it's arguments
 typedef struct {
   osThreadId_t thread_id;
-  pwm_worker_args_t args;
-} pwm_worker_t;
+  worker_args_t args;
+} worker_t;
 
-// pwm_manager_t represents a manager thread
+// manager_t represents a manager thread
 typedef struct {
   osThreadId_t thread_id;
   osMessageQueueId_t queue_id;
-} pwm_manager_t;
+} manager_t;
 
 osMutexId_t led_mutex_id;
 const osMutexAttr_t led_mutex_attr = {"LEDMutex", osMutexPrioInherit, NULL, 0U};
 
-pwm_manager_t manager;
-pwm_worker_t workers[] = {
+manager_t manager;
+worker_t workers[] = {
     {.args = {.led_number = LED1, .period = BLINK_PERIOD, .on_time = 5}},
     {.args = {.led_number = LED2, .period = PWM_PERIOD, .on_time = 2}},
     {.args = {.led_number = LED3, .period = PWM_PERIOD, .on_time = 8}},
@@ -143,7 +144,7 @@ void Manager(void *arg) {
 // It polls for notifications from the manager thread and
 // updates it's argument values if needed.
 void Worker(void *arg) {
-  pwm_worker_args_t *args = (pwm_worker_args_t *)arg;
+  worker_args_t *args = (worker_args_t *)arg;
   manager_notif_t notification;
   osStatus_t status;
 
