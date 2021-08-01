@@ -5,7 +5,6 @@
 #include <stdint.h>
 
 #define LEDs LED1 | LED2 | LED3 | LED4
-#define BUTTONS USW1 | USW2
 
 #define NUM_OF_WORKERS (sizeof(workers) / sizeof(pwm_worker_t))
 
@@ -20,15 +19,19 @@
 #define PWM_PERIOD 10U   // ms
 #define BLINK_PERIOD 50U // ms
 
-// Push buttons are active in low
+// Push buttons are active in 0
 #define ButtonPressed(b) !ButtonRead(b)
+
+#define notifySelectedWorker()                                                 \
+  osMessageQueuePut(workers[selected_worker].args.queue_id, &notification,     \
+                    MSG_PRIO, osWaitForever)
 
 typedef enum {
   SW1_PRESSED,
   SW2_PRESSED,
 } button_event_t;
 
-// Manager notification to workers, no content needed.
+// Notification to workers, no content needed.
 typedef uint8_t manager_notif_t;
 
 typedef struct {
@@ -38,11 +41,13 @@ typedef struct {
   uint16_t period;    // In ms
 } pwm_worker_args_t;
 
+// pwm_worker_t represents a worker thread and it's arguments
 typedef struct {
   osThreadId_t thread_id;
   pwm_worker_args_t args;
 } pwm_worker_t;
 
+// pwm_manager_t represents a manager thread
 typedef struct {
   osThreadId_t thread_id;
   osMessageQueueId_t queue_id;
@@ -59,12 +64,14 @@ pwm_worker_t workers[] = {
     {.args = {.led_number = LED4, .period = PWM_PERIOD, .on_time = 0}},
 };
 
+// SwitchOn switches on a led in a thread-safe manner
 void SwitchOn(uint8_t led) {
   osMutexAcquire(led_mutex_id, osWaitForever);
   LEDOn(led);
   osMutexRelease(led_mutex_id);
 }
 
+// SwitchOff switches off a led in a thread-safe manner
 void SwitchOff(uint8_t led) {
   osMutexAcquire(led_mutex_id, osWaitForever);
   LEDOff(led);
@@ -111,28 +118,23 @@ void Manager(void *arg) {
   for (;;) {
     osMessageQueueGet(manager.queue_id, &event, NULL, osWaitForever);
 
-    if (event == SW1_PRESSED) {
+    switch (event) {
+    case SW1_PRESSED:
       // We need to restore the PWM period of the current selected worker
       workers[selected_worker].args.period = PWM_PERIOD;
-      osMessageQueuePut(workers[selected_worker].args.queue_id, &notification,
-                        MSG_PRIO, osWaitForever);
+      notifySelectedWorker();
 
       selected_worker = (selected_worker + 1) % NUM_OF_WORKERS;
 
       workers[selected_worker].args.period = BLINK_PERIOD;
-      osMessageQueuePut(workers[selected_worker].args.queue_id, &notification,
-                        MSG_PRIO, osWaitForever);
-    }
-
-    if (event == SW2_PRESSED) {
-      uint8_t on_time = workers[selected_worker].args.on_time;
-      on_time += 1;
-      if (on_time > PWM_PERIOD)
-        on_time = 0;
-
-      workers[selected_worker].args.on_time = on_time;
-      osMessageQueuePut(workers[selected_worker].args.queue_id, &notification,
-                        MSG_PRIO, osWaitForever);
+      notifySelectedWorker();
+      break;
+    case SW2_PRESSED:
+      workers[selected_worker].args.on_time += 1;
+      if (workers[selected_worker].args.on_time > PWM_PERIOD)
+        workers[selected_worker].args.on_time = 0;
+      notifySelectedWorker();
+      break;
     }
   }
 }
@@ -157,12 +159,17 @@ void Worker(void *arg) {
       on_time = args->on_time;
       period = args->period;
     }
-
     SwitchOn(led_number);
     osDelay(on_time);
     SwitchOff(led_number);
     osDelay(period - on_time);
   }
+}
+
+void initializeHardware(void) {
+  LEDInit(LEDs);
+  ButtonInit(USW1 | USW2);
+  ButtonIntEnable(USW1 | USW2);
 }
 
 void initializeWorkers(void) {
@@ -180,12 +187,8 @@ void initializeManager(void) {
 }
 
 void main(void) {
-  LEDInit(LEDs);
-  ButtonInit(USW1 | USW2);
-  ButtonIntEnable(USW1 | USW2);
-
+  initializeHardware();
   osKernelInitialize();
-
   initializeManager();
   initializeWorkers();
   led_mutex_id = osMutexNew(&led_mutex_attr);
